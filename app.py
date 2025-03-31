@@ -104,7 +104,7 @@ Your primary goal is to accurately answer user questions by utilizing informatio
 
 Question: {query}
 
-In your responses, incorporate the following relevant data points:
+In your responses, incorporate the following relevant data points that got retrieved and answer with precise context:
 """,
 )
 
@@ -151,8 +151,12 @@ def retrieve_from_faq(query, vectorstore):
     retriever = vectorstore.as_retriever()
     qa_chain = RetrievalQA.from_chain_type(llm=llm, retriever=retriever)
     results = qa_chain.invoke({"query":query})
-    
-    return results
+
+    print(results)
+    result_text = results['result']
+    response = result_text.split("\n\n")
+    final_answer = response[-1]
+    return final_answer
 
 
 # fetch order and product details
@@ -165,8 +169,9 @@ def fetch_order_details(order_id, order_df, product_df):
             ","
         )  # Assuming CSV stores product IDs as comma-separated
         product_details = product_df[
-            product_df["product_id"].astype(str).isin(product_ids)
+            product_df["productId"].astype(str).isin(product_ids)
         ]
+        print("product_details",product_details)
 
         order_summary = {
             "order_id": order_info["orderNumber"],
@@ -191,15 +196,29 @@ def chatbot_rag(query, order_df, product_df, vectorstore):
     
 
     if "order lookup" in task_type.lower():
-        order_lookup_chain = LLMChain(llm=llm, prompt=order_lookup_prompt)
-        response = order_lookup_chain.run(query=query)
+        order_lookup_chain = order_lookup_prompt| llm | RunnableLambda(lambda x: x)
+        response = order_lookup_chain.invoke({"query":query})
 
-        # Extract order ID from response
-        order_id = "".join(filter(str.isdigit, response))
-        if order_id:
+        if isinstance(response, dict):  
+            response_text = response.get("text", "")
+    
+        else:
+            response_text = str(response)
+            
+        # Regex pattern to extract only the message after </think>
+        match = re.search(r"</think>\n\n \s*\n*(.*)", response_text, re.DOTALL)
+
+        if match:
+            message = match.group(1).strip()
+            print(message)
+        else:
+            print("No message found.")
+    
+        """if order_id:
             return fetch_order_details(order_id, order_df, product_df)
         else:
-            return "Order ID not found. Please try again."
+            return 'Order ID not found. Please try again.'"""
+    
 
     elif "faq" in task_type.lower():
         return retrieve_from_faq(query, vectorstore)
